@@ -1,0 +1,9 @@
+{
+    "actorSpecification": 1,
+    "name": "restaurant-depot-receipts",
+    "title": "Restaurant Depot Receipt Downloader",
+    "version": "0.0",
+    "buildTag": "latest",
+    "dockerfile": "./Dockerfile",
+    "input": "../input_schema.json"
+}

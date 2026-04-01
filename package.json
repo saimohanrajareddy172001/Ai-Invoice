@@ -1,0 +1,21 @@
+{
+    "name": "restaurant-depot-receipts",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Apify Actor — downloads Restaurant Depot Excel receipts and uploads them to Google Drive to trigger an n8n invoice workflow.",
+    "main": "src/main.js",
+    "scripts": {
+        "start": "node src/main.js"
+    },
+    "dependencies": {
+        "@crawlee/playwright": "^3.10.0",
+        "apify": "^3.2.6",
+        "googleapis": "^144.0.0",
+        "openai": "^6.32.0",
+        "playwright": "^1.49.1",
+        "xlsx": "^0.18.5"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

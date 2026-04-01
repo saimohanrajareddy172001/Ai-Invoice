@@ -1,0 +1,61 @@
+{
+    "title": "Restaurant Depot Receipt Downloader (Multi-Tenant)",
+    "description": "Loads all active clients from Supabase, logs into Restaurant Depot for each one, downloads Excel receipts, and uploads them to YOUR central Google Drive (per-client subfolders). Queues each file in Supabase for n8n extraction.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "supabaseUrl": {
+            "title": "Supabase Project URL",
+            "type": "string",
+            "description": "Your Supabase project URL (e.g. https://xxxx.supabase.co). Found in Supabase → Settings → API.",
+            "editor": "textfield"
+        },
+        "supabaseKey": {
+            "title": "Supabase Service Role Key",
+            "type": "string",
+            "description": "Supabase service_role key (NOT the anon key). Found in Settings → API → service_role. Keep this secret.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "googleOAuthClientId": {
+            "title": "Google OAuth Client ID (Your Account)",
+            "type": "string",
+            "description": "YOUR central Google OAuth2 Client ID. All invoice files upload to YOUR Google Drive using this credential.",
+            "editor": "textfield"
+        },
+        "googleOAuthClientSecret": {
+            "title": "Google OAuth Client Secret (Your Account)",
+            "type": "string",
+            "description": "YOUR central Google OAuth2 Client Secret.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "googleOAuthRefreshToken": {
+            "title": "Google OAuth Refresh Token (Your Account)",
+            "type": "string",
+            "description": "YOUR central Google OAuth2 Refresh Token. Authorizes uploads to your Google Drive on behalf of your account.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "dateRange": {
+            "title": "Date Range",
+            "type": "string",
+            "description": "The date range to request receipts for. Applied to all clients.",
+            "editor": "select",
+            "default": "Last 30 Days – On Demand",
+            "enum": [
+                "Last 30 Days – On Demand",
+                "Last 60 Days",
+                "Last 90 Days",
+                "This Year"
+            ],
+            "enumTitles": [
+                "Last 30 Days (On Demand)",
+                "Last 60 Days",
+                "Last 90 Days",
+                "This Year"
+            ]
+        }
+    },
+    "required": ["supabaseUrl", "supabaseKey", "googleOAuthClientId", "googleOAuthClientSecret", "googleOAuthRefreshToken"]
+}

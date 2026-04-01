@@ -1,0 +1,27 @@
+# Dependencies — installed fresh by RUN npm install in Dockerfile
+node_modules/
+
+# Local Apify storage — contains plaintext credentials, not needed in image
+storage/
+
+# One-off debug/maintenance scripts — not part of production actor
+fix-*.mjs
+inspect-*.mjs
+get-refresh-token.mjs
+
+# Secrets
+.env
+credentials.json
+token.json
+
+# Git
+.git/
+.gitignore
+
+# OS
+.DS_Store
+*.log
+
+# Temp
+.tmp/
+/tmp/

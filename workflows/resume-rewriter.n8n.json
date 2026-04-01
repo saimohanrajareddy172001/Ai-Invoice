@@ -1,0 +1,149 @@
+{
+  "name": "Resume Rewriter — ATS 90+",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "job_title",
+              "value": "={{ $json.job_title }}"
+            },
+            {
+              "name": "job_description",
+              "value": "={{ $json.job_description }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Inputs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "job_title",
+              "type": "string"
+            },
+            {
+              "name": "job_description",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000000",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /path/to/n8n && node tools/fetch-resume.mjs 2>&1"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "1. Fetch Resume from Overleaf",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "notes": "Clones or pulls the Overleaf project. Update the path in the command to match your machine."
+    },
+    {
+      "parameters": {
+        "command": "=cd /path/to/n8n && node tools/rewrite-resume.mjs {{ $('Inputs').item.json.job_description.replace(/\"/g, '\\\"') }} \"{{ $('Inputs').item.json.job_title }}\" 2>&1"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "2. Rewrite for ATS 90+ (Claude)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [940, 300],
+      "notes": "Calls Claude API. Reads .tmp/overleaf-resume/<tex-file>, rewrites it, saves backup."
+    },
+    {
+      "parameters": {
+        "command": "=cd /path/to/n8n && node tools/push-to-overleaf.mjs \"{{ $('Inputs').item.json.job_title }}\" 2>&1"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "name": "3. Push to Overleaf",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1180, 300],
+      "notes": "Commits and pushes rewritten .tex back to Overleaf. Open the project URL it prints to compile."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "done"
+            },
+            {
+              "name": "fetch_output",
+              "value": "={{ $('1. Fetch Resume from Overleaf').item.json.stdout }}"
+            },
+            {
+              "name": "rewrite_output",
+              "value": "={{ $('2. Rewrite for ATS 90+ (Claude)').item.json.stdout }}"
+            },
+            {
+              "name": "push_output",
+              "value": "={{ $('3. Push to Overleaf').item.json.stdout }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1420, 300]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [{ "node": "Inputs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Inputs": {
+      "main": [
+        [{ "node": "1. Fetch Resume from Overleaf", "type": "main", "index": 0 }]
+      ]
+    },
+    "1. Fetch Resume from Overleaf": {
+      "main": [
+        [{ "node": "2. Rewrite for ATS 90+ (Claude)", "type": "main", "index": 0 }]
+      ]
+    },
+    "2. Rewrite for ATS 90+ (Claude)": {
+      "main": [
+        [{ "node": "3. Push to Overleaf", "type": "main", "index": 0 }]
+      ]
+    },
+    "3. Push to Overleaf": {
+      "main": [
+        [{ "node": "Result", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "id": "resume-rewriter-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "local"
+  },
+  "tags": []
+}
