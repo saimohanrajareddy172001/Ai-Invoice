@@ -256,21 +256,28 @@ function parseInvoiceExcel(localPath) {
 
         console.log(`  Col map: desc=${descKey}, unitQty=${unitQtyKey}, caseQty=${caseQtyKey}, unitPrice=${unitPriceKey}, lineTotal=${lineTotalKey}`);
 
+        // UPC column — real products have a positive UPC barcode; summary/payment rows have 0 or negative
+        const upcKey = columns.find(k => /\bupc\b/i.test(k)) ?? columns[0];
+
         const items = [];
         let invoiceTotalFromExcel = null;
 
         for (const row of jsonRows) {
             const item_name = descKey ? String(row[descKey]).trim() : '';
 
-            // Capture grand total from a summary row
+            // Capture grand total even from non-product rows
             if (/^(total|sub.?total|grand.?total)$/i.test(item_name)) {
                 const t = parseNum(row[lineTotalKey]);
                 if (t > 0) invoiceTotalFromExcel = t;
                 continue;
             }
 
-            // Skip non-product rows: taxes, payments, balance lines, RD credit/IOU rows
-            if (!item_name || /^(tax|freight|discount|shipping|upc|previous.?balance|balance|amex|visa|mastercard|discover|cash|check|ebt|iou)/i.test(item_name)) continue;
+            // Use UPC as the product gate — real items always have a positive UPC.
+            // Summary rows (Tax, Sub-Total, AMEX, IOU, Previous Balance, etc.) have UPC 0 or negative.
+            const upc = upcKey ? parseNum(row[upcKey]) : 0;
+            if (upc <= 0) continue;
+
+            if (!item_name) continue;
 
             const unit_qty = parseNum(row[unitQtyKey ?? fallbackQtyKey]);
             const case_qty = caseQtyKey ? parseNum(row[caseQtyKey]) : 0;
