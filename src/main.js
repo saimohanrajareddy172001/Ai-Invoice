@@ -701,8 +701,6 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                     status: 'success',
                     fileName,
                     receiptDate,
-                    googleDriveFileId: driveFile.id,
-                    googleDriveUrl: driveFile.webViewLink,
                     supabaseFileId: fileRecordId,
                 });
 
