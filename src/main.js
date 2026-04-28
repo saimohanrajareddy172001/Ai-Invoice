@@ -263,13 +263,14 @@ function parseInvoiceExcel(localPath) {
             const item_name = descKey ? String(row[descKey]).trim() : '';
 
             // Capture grand total from a summary row
-            if (/^(total|subtotal|grand.?total)$/i.test(item_name)) {
+            if (/^(total|sub.?total|grand.?total)$/i.test(item_name)) {
                 const t = parseNum(row[lineTotalKey]);
                 if (t > 0) invoiceTotalFromExcel = t;
                 continue;
             }
 
-            if (!item_name || /^(tax|freight|discount|shipping|upc)$/i.test(item_name)) continue;
+            // Skip non-product rows: taxes, payments, balance lines
+            if (!item_name || /^(tax|freight|discount|shipping|upc|previous.?balance|balance|amex|visa|mastercard|discover|cash|check|ebt)/i.test(item_name)) continue;
 
             const unit_qty = parseNum(row[unitQtyKey ?? fallbackQtyKey]);
             const case_qty = caseQtyKey ? parseNum(row[caseQtyKey]) : 0;
