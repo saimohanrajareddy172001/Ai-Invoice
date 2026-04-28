@@ -198,6 +198,22 @@ async function logToSupabase(sbUrl, sbKey, { fileId, restaurantId, stage, status
     }
 }
 
+// ─── Item categorization ─────────────────────────────────────────────────────
+
+function categorizeItem(itemName) {
+    const n = itemName.toUpperCase();
+
+    if (/^FZ\b/.test(n))                                                        return 'Frozen';
+    if (/^PROD\b|^PD\b|\b(BROCCOLI|CAULIFLOWER|CILANTRO|CUCUMBER|CELERY|ZUCCHINI|TOMATILLO|MANGO|LEMON|LIME|BERRY|BERRIES|SPINACH|GINGER|MUSHROOM|TOMATO|CARROT|ONION|GARLIC|PEPPER)\b/.test(n)) return 'Produce';
+    if (/\b(CHIX|CHICKEN|LAMB|BEEF|PORK|SHR\b|SHRIMP|TILAPIA|POMPANO|SALMON|TUNA|FISH|WING|HALAL)\b/.test(n)) return 'Protein';
+    if (/\b(CREAM|MILK|MLK\b|BUTTER|BTR\b|YOG\b|YOGURT|CHEESE|CHS\b|PANEER|DAHI|EGG)\b/.test(n))             return 'Dairy';
+    if (/^BIB\b|\b(LEMONADE|PURE LIFE|WATER|SODA)\b/.test(n))                  return 'Beverages';
+    if (/\b(CONT\b|FOIL|BAG\b|GLOVE|TOWEL|BROOM|BLEACH|PINESOL|CUP\b|LID\b|LINER|FILM\b|CHARMIN|GRILL BRICK|STRAW|WRAP|NAPKIN)\b/.test(n)) return 'Supplies';
+    if (/\b(OIL\b|FLOUR|SUGAR|STARCH|RICE|SALT|BASMATI|BEAN|PUREE|SAUCE|BATTER|KETCHUP|BAKING|PESTO|SRIRACHA|TERIYAKI|OLIVE|SPICE|SP\b|TRUFFLE|NUT\b|GARBANZO|CORN|EVAP|VINEGAR|MAYO|MUSTARD|SOY|SEASONING)\b/.test(n)) return 'Dry Goods';
+
+    return 'Other';
+}
+
 // ─── Excel parser ────────────────────────────────────────────────────────────
 
 // Restaurant Depot column format: UPC | Description | Unit Qty | Case Qty | Price
@@ -300,7 +316,7 @@ function parseInvoiceExcel(localPath) {
 
             if (unit_price === 0 && total === 0) continue;
 
-            items.push({ item_name, category: 'Other', unit_qty, case_qty, unit_price, total });
+            items.push({ item_name, category: categorizeItem(item_name), unit_qty, case_qty, unit_price, total });
         }
 
         console.log(`  Parsed ${items.length} line items, excel total=${invoiceTotalFromExcel}`);
