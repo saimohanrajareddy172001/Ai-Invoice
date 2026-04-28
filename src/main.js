@@ -656,7 +656,11 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                         console.log(`  📥 Queued in Supabase: invoice_files.id = ${fileRecordId}`);
                     } catch (sbErr) {
                         if (sbErr.message.includes('23505') || sbErr.message.includes('duplicate')) {
-                            console.log(`  ℹ Supabase: file already registered (conflict) — skipping duplicate insert`);
+                            // File already registered — fetch the existing record's id so dedup still works
+                            const existing = await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_files', null,
+                                `?filename=eq.${encodeURIComponent(fileName)}&restaurant_id=eq.${restaurantId}&select=id&limit=1`);
+                            fileRecordId = existing?.[0]?.id ?? null;
+                            console.log(`  ℹ File already registered — existing fileRecordId=${fileRecordId}`);
                         } else {
                             console.warn(`  ⚠ Could not register file in Supabase: ${sbErr.message}`);
                         }
@@ -677,12 +681,16 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                 try {
                     const parsed = parseInvoiceExcel(localPath);
                     if (parsed && parsed.items.length > 0) {
-                        // Dedup guard: skip if header already exists for this file
-                        const existingHeaders = fileRecordId
+                        // Dedup guard: skip if header already exists for this file or invoice number
+                        const existingByFile = fileRecordId
                             ? await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_headers', null, `?file_id=eq.${fileRecordId}&select=id`)
                             : [];
+                        const existingByInvoice = (!existingByFile?.length && parsed.invoice_number)
+                            ? await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_headers', null, `?invoice_number=eq.${parsed.invoice_number}&restaurant_id=eq.${restaurantId}&select=id`)
+                            : [];
+                        const existingHeaders = existingByFile?.length ? existingByFile : existingByInvoice;
                         if (existingHeaders && existingHeaders.length > 0) {
-                            console.log(`  ⏭ invoice_header already exists for file_id ${fileRecordId} — skipping duplicate insert`);
+                            console.log(`  ⏭ invoice_header already exists for file_id ${fileRecordId} / invoice #${parsed.invoice_number} — skipping duplicate insert`);
                         } else {
                             // Prefer Excel total row → sum of line items → filename
                             const lineItemSum = parsed.items.reduce((s, i) => s + i.total, 0);
