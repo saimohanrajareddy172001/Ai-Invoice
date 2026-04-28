@@ -269,8 +269,8 @@ function parseInvoiceExcel(localPath) {
                 continue;
             }
 
-            // Skip non-product rows: taxes, payments, balance lines
-            if (!item_name || /^(tax|freight|discount|shipping|upc|previous.?balance|balance|amex|visa|mastercard|discover|cash|check|ebt)/i.test(item_name)) continue;
+            // Skip non-product rows: taxes, payments, balance lines, RD credit/IOU rows
+            if (!item_name || /^(tax|freight|discount|shipping|upc|previous.?balance|balance|amex|visa|mastercard|discover|cash|check|ebt|iou)/i.test(item_name)) continue;
 
             const unit_qty = parseNum(row[unitQtyKey ?? fallbackQtyKey]);
             const case_qty = caseQtyKey ? parseNum(row[caseQtyKey]) : 0;
