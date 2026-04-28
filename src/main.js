@@ -215,6 +215,113 @@ function categorizeItem(itemName) {
     return 'Other';
 }
 
+// ─── Item name normalization ─────────────────────────────────────────────────
+
+const RD_ABBR = {
+    // Proteins
+    'CHIX':    'Chicken',  'CKIX': 'Chicken',
+    'HAL':     'Halal',
+    'BNLS':    'Boneless',
+    'BRST':    'Breast',
+    'THGH':    'Thigh',
+    'WNG':     'Wing',
+    'SHR':     'Shrimp',
+    'FLT':     'Fillet',
+    'R/W':     'Raw',
+    'R-PDTFF': 'Raw Peeled & Deveined',
+    'PDTFF':   'Peeled & Deveined',
+    'FRNCH':   'French',
+    'NZ':      'New Zealand',
+    'GRND':    'Ground',
+    'GRND':    'Ground',
+    // Dairy
+    'BTR':     'Butter',
+    'UNSLTD':  'Unsalted',
+    'SLD':     'Solid',
+    'CHS':     'Cheese',
+    'YOG':     'Yogurt',
+    'MLK':     'Milk',
+    'HOMO':    'Whole',
+    'W/M':     'Whole Milk',
+    'EVAP':    'Evaporated',
+    // Produce prefixes — remove, item name follows
+    'PROD':    '',
+    'PD':      '',
+    // Frozen prefix
+    'FZ':      'Frozen',
+    // Produce
+    'GARLC':   'Garlic',
+    'ASN':     'Asian',
+    'CLNTRO':  'Cilantro',
+    'SRNG':    'Spring',
+    'ORG':     'Organic',
+    'RNBW':    'Rainbow',
+    'CELLO':   '',
+    'JMB':     'Jumbo',
+    'YLW':     'Yellow',
+    'GRN':     'Green',
+    'WHT':     'White',
+    'BLK':     'Black',
+    'MSHRM':   'Mushroom',
+    'TMTO':    'Tomato',
+    'HRB':     'Herb',
+    // Dry Goods
+    'BASMATI': 'Basmati',
+    'XLONG':   'Extra Long',
+    'GARBANZO':'Garbanzo',
+    'SRIRACHA':'Sriracha',
+    'KETCHUP': 'Ketchup',
+    'BRD':     'Bread',
+    // Supplies
+    'NITRL':   'Nitrile',
+    'CONT':    'Container',
+    'CMB':     'Combo',
+    'HNG':     'Hinged',
+    'PP':      '',
+    'KIT':     'Kit',
+    'BAG':     'Bag',
+    'SHP':     'Shopping',
+    'BR':      'Brown',
+    // Sizing / units — keep lowercase
+    'GAL':     'gal',
+    'OZ':      'oz',
+    'LB':      'lb',
+    'CT':      'ct',
+    'CS':      'cs',
+    'PKG':     'pkg',
+    // Brand noise to remove
+    'JF':      '',  // Johanna Foods brand code
+    'CQ':      '',  // store brand code
+    'PFR':     '',
+    'CAFE':    '',
+};
+
+function normalizeItemName(raw) {
+    // Title-case each word, expanding known abbreviations
+    const words = raw.trim().split(/\s+/);
+    const expanded = words.map(word => {
+        // Preserve size specs like "16/20", "5X6", "4/5", "2.5LB" as-is
+        if (/^\d/.test(word)) return word;
+        const upper = word.toUpperCase().replace(/[^A-Z0-9/\-&]/, '');
+        if (upper in RD_ABBR) {
+            const replacement = RD_ABBR[upper];
+            return replacement; // empty string = remove the word
+        }
+        // Title case unknown words
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    });
+    return expanded.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+// ─── Purchase unit detection ─────────────────────────────────────────────────
+
+function getPurchaseUnit(unit_qty, case_qty) {
+    if (unit_qty > 1)  return 'lb';    // sold by weight (qty = lbs)
+    if (unit_qty === 1) return 'each'; // sold as single unit/package
+    if (case_qty > 0)  return 'case';  // sold by the case
+    return 'each';
+}
+
 // ─── Excel parser ────────────────────────────────────────────────────────────
 
 // Restaurant Depot column format: UPC | Description | Unit Qty | Case Qty | Price
@@ -317,7 +424,9 @@ function parseInvoiceExcel(localPath) {
 
             if (unit_price === 0 && total === 0) continue;
 
-            items.push({ item_name, category: categorizeItem(item_name), unit_qty, case_qty, unit_price, total });
+            const purchase_unit = getPurchaseUnit(unit_qty, case_qty);
+            const display_name  = normalizeItemName(item_name);
+            items.push({ item_name, display_name, category: categorizeItem(item_name), unit_qty, case_qty, unit_price, total, purchase_unit });
         }
 
         console.log(`  Parsed ${items.length} line items, excel total=${invoiceTotalFromExcel}`);
@@ -710,11 +819,13 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                                         restaurant_id: restaurantId,
                                         invoice_date:  receiptDate,
                                         item_name:     item.item_name,
+                                        display_name:  item.display_name,
                                         category:      item.category,
                                         unit_qty:      item.unit_qty,
                                         case_qty:      item.case_qty,
                                         unit_price:    item.unit_price,
                                         total:         item.total,
+                                        purchase_unit: item.purchase_unit,
                                     });
                                 }
                                 console.log(`  📊 Inserted invoice header (total=$${invoiceTotal}) + ${parsed.items.length} line items`);
