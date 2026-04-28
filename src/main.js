@@ -554,12 +554,27 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                 const fileName = `RestaurantDepot_${receiptDate}_$${receiptTotal}.xlsx`;
                 console.log(`  Target filename: ${fileName}`);
 
-                // Dedup check 1: Drive filename (avoid re-downloading)
+                // Dedup check 1: Drive filename
                 const alreadyUploaded = await fileExistsInDrive(drive, fileName, googleDriveFolderId);
+
+                // If already in Drive, check if Supabase has parsed data too.
+                // If Supabase data exists → truly done, skip. If missing → re-download and parse.
+                let fileRecordId = null;
                 if (alreadyUploaded) {
-                    console.log(`  ⏭ Already in Drive — skipping: ${fileName}`);
-                    summary.duplicates++;
-                    continue;
+                    const existingFiles = await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_files', null,
+                        `?filename=eq.${encodeURIComponent(fileName)}&restaurant_id=eq.${restaurantId}&select=id`);
+                    fileRecordId = existingFiles?.[0]?.id ?? null;
+
+                    if (fileRecordId) {
+                        const existingHeaders = await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_headers', null,
+                            `?file_id=eq.${fileRecordId}&select=id`);
+                        if (existingHeaders && existingHeaders.length > 0) {
+                            console.log(`  ⏭ Already in Drive + Supabase — skipping: ${fileName}`);
+                            summary.duplicates++;
+                            continue;
+                        }
+                    }
+                    console.log(`  In Drive but no Supabase invoice data — re-downloading to parse: ${fileName}`);
                 }
 
                 // Find Download Excel button within this row
@@ -594,33 +609,35 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                 }
                 console.log(`  Saved locally: ${localPath} (${stat.size} bytes)`);
 
-                // Upload to Google Drive with retry
-                console.log(`  Uploading to Drive folder: ${googleDriveFolderId}`);
-                const driveFile = await withRetry(() =>
-                    uploadToGoogleDrive(drive, localPath, fileName, googleDriveFolderId)
-                );
-                console.log(`  ✅ Uploaded: ${driveFile.webViewLink}`);
+                if (!alreadyUploaded) {
+                    // Upload to Google Drive with retry (only if not already there)
+                    console.log(`  Uploading to Drive folder: ${googleDriveFolderId}`);
+                    const driveFile = await withRetry(() =>
+                        uploadToGoogleDrive(drive, localPath, fileName, googleDriveFolderId)
+                    );
+                    console.log(`  ✅ Uploaded: ${driveFile.webViewLink}`);
 
-                // Register in Supabase queue (dedup 2: drive_file_id UNIQUE will reject replay)
-                let fileRecordId = null;
-                try {
-                    const [fileRecord] = await supabaseRequest(sbUrl, sbKey, 'POST', 'invoice_files', {
-                        restaurant_id: restaurantId,
-                        drive_file_id: driveFile.id,
-                        filename:      fileName,
-                        file_date:     parseFilenameDate(fileName),
-                        file_total:    parseFilenameTotal(fileName),
-                        status:        'pending',
-                    });
-                    fileRecordId = fileRecord?.id ?? null;
-                    console.log(`  📥 Queued in Supabase: invoice_files.id = ${fileRecordId}`);
-                } catch (sbErr) {
-                    // Conflict (23505) means the drive_file_id was already recorded — safe to ignore
-                    if (sbErr.message.includes('23505') || sbErr.message.includes('duplicate')) {
-                        console.log(`  ℹ Supabase: file already registered (conflict) — skipping duplicate insert`);
-                    } else {
-                        console.warn(`  ⚠ Could not register file in Supabase: ${sbErr.message}`);
+                    // Register in Supabase invoice_files
+                    try {
+                        const [fileRecord] = await supabaseRequest(sbUrl, sbKey, 'POST', 'invoice_files', {
+                            restaurant_id: restaurantId,
+                            drive_file_id: driveFile.id,
+                            filename:      fileName,
+                            file_date:     parseFilenameDate(fileName),
+                            file_total:    parseFilenameTotal(fileName),
+                            status:        'pending',
+                        });
+                        fileRecordId = fileRecord?.id ?? null;
+                        console.log(`  📥 Queued in Supabase: invoice_files.id = ${fileRecordId}`);
+                    } catch (sbErr) {
+                        if (sbErr.message.includes('23505') || sbErr.message.includes('duplicate')) {
+                            console.log(`  ℹ Supabase: file already registered (conflict) — skipping duplicate insert`);
+                        } else {
+                            console.warn(`  ⚠ Could not register file in Supabase: ${sbErr.message}`);
+                        }
                     }
+                } else {
+                    console.log(`  Skipping Drive re-upload (already there). Parsing locally...`);
                 }
 
                 await logToSupabase(sbUrl, sbKey, {
@@ -628,7 +645,7 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                     restaurantId,
                     stage: 'intake',
                     status: 'success',
-                    message: `Uploaded ${fileName} → Drive ID ${driveFile.id}`,
+                    message: alreadyUploaded ? `Re-parsed ${fileName} (was in Drive, missing Supabase data)` : `Uploaded ${fileName}`,
                 });
 
                 // Parse Excel and write invoice_headers + invoice_lines to Supabase
