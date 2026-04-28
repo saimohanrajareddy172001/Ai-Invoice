@@ -82,7 +82,7 @@ function totalToFilenameSegment(totalStr) {
  * e.g. 'RestaurantDepot_2026-02-17_$1665-64.xlsx' → 1665.64
  */
 function parseFilenameTotal(filename) {
-    const m = filename.match(/\$(\d+)-(\d{2})\.xlsx$/);
+    const m = filename.match(/\$(-?\d+)-(\d{2})\.xlsx$/);
     if (m) return parseFloat(`${m[1]}.${m[2]}`);
     return null;
 }
@@ -548,7 +548,7 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                 for (const text of cellTexts) {
                     const dateMatch = text.match(/\d{4}[\/\-]\d{2}[\/\-]\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/);
                     if (dateMatch) receiptDate = formatDate(dateMatch[0]);
-                    const totalMatch = text.match(/\$[\d,]+\.\d{2}/);
+                    const totalMatch = text.match(/-?\$[\d,]+\.\d{2}/);
                     if (totalMatch) receiptTotal = totalToFilenameSegment(totalMatch[0]);
                 }
 
@@ -660,8 +660,9 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                         if (existingHeaders && existingHeaders.length > 0) {
                             console.log(`  ⏭ invoice_header already exists for file_id ${fileRecordId} — skipping duplicate insert`);
                         } else {
-                            // Prefer total from inside the Excel; fall back to filename
-                            const invoiceTotal = parsed.invoiceTotalFromExcel ?? parseFilenameTotal(fileName) ?? 0;
+                            // Prefer Excel total row → sum of line items → filename
+                            const lineItemSum = parsed.items.reduce((s, i) => s + i.total, 0);
+                            const invoiceTotal = parsed.invoiceTotalFromExcel ?? (lineItemSum !== 0 ? Math.round(lineItemSum * 100) / 100 : null) ?? parseFilenameTotal(fileName) ?? 0;
                             const [header] = await supabaseRequest(sbUrl, sbKey, 'POST', 'invoice_headers', {
                                 restaurant_id:  restaurantId,
                                 file_id:        fileRecordId,
