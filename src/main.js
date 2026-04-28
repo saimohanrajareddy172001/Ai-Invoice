@@ -2,6 +2,7 @@ import { Actor } from 'apify';
 import { chromium } from 'playwright';
 import { google } from 'googleapis';
 import fs from 'fs';
+import XLSX from 'xlsx';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -197,6 +198,111 @@ async function logToSupabase(sbUrl, sbKey, { fileId, restaurantId, stage, status
     }
 }
 
+// ─── Excel parser ────────────────────────────────────────────────────────────
+
+// Restaurant Depot column format: UPC | Description | Unit Qty | Case Qty | Price
+// "Price" = line total (NOT unit price). Unit price = Price ÷ qty.
+function parseInvoiceExcel(localPath) {
+    try {
+        const workbook = XLSX.readFile(localPath);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+        console.log(`  Excel: ${rawRows.length} rows. First 6:`, JSON.stringify(rawRows.slice(0, 6)));
+
+        // Find the header row (contains qty/price/description keywords)
+        let headerRowIdx = -1;
+        for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+            const lower = rawRows[i].map(c => String(c).toLowerCase()).join(' ');
+            if (/qty|quantity|price|desc|item|product/.test(lower)) {
+                headerRowIdx = i;
+                break;
+            }
+        }
+
+        if (headerRowIdx === -1) {
+            console.warn('  Could not find header row in Excel');
+            return null;
+        }
+
+        // Parse with auto-detected header
+        const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
+        const columns = Object.keys(jsonRows[0] ?? {});
+        console.log(`  Header row ${headerRowIdx}, columns: ${columns.join(', ')}`);
+
+        // Look for invoice/order number above the header
+        let invoice_number = null;
+        for (let i = 0; i < headerRowIdx; i++) {
+            const m = rawRows[i].join(' ').match(/(?:invoice|order|receipt)[#\s:]*([A-Z0-9-]+)/i);
+            if (m) { invoice_number = m[1]; break; }
+        }
+
+        const parseNum = (val) => {
+            const n = parseFloat(String(val ?? '').replace(/[$,]/g, ''));
+            return isNaN(n) ? 0 : n;
+        };
+
+        // Detect column roles — Restaurant Depot uses:
+        //   "Description", "Unit Qty", "Case Qty", "Price" (= line total)
+        const descKey    = columns.find(k => /desc|item|product|name/i.test(k));
+        const unitQtyKey = columns.find(k => /unit.?qty|unit.?quantity/i.test(k));
+        const caseQtyKey = columns.find(k => /case.?qty|case.?quantity/i.test(k));
+        const fallbackQtyKey = columns.find(k => /\bqty\b|quantity/i.test(k));
+        // explicit unit price column (rare on RD receipts)
+        const unitPriceKey = columns.find(k => /unit.?price|price.?unit|\beach\b|unit.?cost/i.test(k));
+        // line total — "Total"/"Extended"/"Amount" OR Restaurant Depot's plain "Price" column
+        const lineTotalKey = columns.find(k => /\btotal\b|extended|amount/i.test(k))
+                          ?? columns.find(k => /\bprice\b/i.test(k));
+
+        console.log(`  Col map: desc=${descKey}, unitQty=${unitQtyKey}, caseQty=${caseQtyKey}, unitPrice=${unitPriceKey}, lineTotal=${lineTotalKey}`);
+
+        const items = [];
+        let invoiceTotalFromExcel = null;
+
+        for (const row of jsonRows) {
+            const item_name = descKey ? String(row[descKey]).trim() : '';
+
+            // Capture grand total from a summary row
+            if (/^(total|subtotal|grand.?total)$/i.test(item_name)) {
+                const t = parseNum(row[lineTotalKey]);
+                if (t > 0) invoiceTotalFromExcel = t;
+                continue;
+            }
+
+            if (!item_name || /^(tax|freight|discount|shipping|upc)$/i.test(item_name)) continue;
+
+            const unit_qty = parseNum(row[unitQtyKey ?? fallbackQtyKey]);
+            const case_qty = caseQtyKey ? parseNum(row[caseQtyKey]) : 0;
+            const line_total = lineTotalKey ? parseNum(row[lineTotalKey]) : 0;
+            const unit_price_direct = unitPriceKey ? parseNum(row[unitPriceKey]) : 0;
+
+            let unit_price = unit_price_direct;
+            let total = line_total;
+
+            // RD format: Price column = line total → derive unit price
+            if (unit_price === 0 && total > 0) {
+                const qty = unit_qty > 0 ? unit_qty : case_qty > 0 ? case_qty : 1;
+                unit_price = Math.round((total / qty) * 10000) / 10000;
+            }
+            // Fallback: have unit price but no total
+            if (total === 0 && unit_price > 0) {
+                const qty = unit_qty > 0 ? unit_qty : case_qty > 0 ? case_qty : 1;
+                total = Math.round(unit_price * qty * 100) / 100;
+            }
+
+            if (unit_price === 0 && total === 0) continue;
+
+            items.push({ item_name, category: 'Other', unit_qty, case_qty, unit_price, total });
+        }
+
+        console.log(`  Parsed ${items.length} line items, excel total=${invoiceTotalFromExcel}`);
+        return { invoice_number, items, invoiceTotalFromExcel };
+    } catch (err) {
+        console.warn(`  ⚠ Excel parse failed: ${err.message}`);
+        return null;
+    }
+}
+
 // ─── Per-client processing ────────────────────────────────────────────────────
 
 /**
@@ -211,13 +317,16 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
         id: restaurantId,
         name: restaurantName,
         rd_email: email,
-        rd_password: password,
+        rd_password: passwordRaw,
         rd_store_number: storeNumber,
         drive_folder_id: googleDriveFolderId,
     } = client;
 
+    const password = passwordRaw != null ? String(passwordRaw) : null;
+
     console.log(`\n${'═'.repeat(60)}`);
     console.log(`  CLIENT: ${restaurantName} (id: ${restaurantId})`);
+    console.log(`  Email: ${email}, Password set: ${password != null}`);
     console.log(`${'═'.repeat(60)}`);
 
     const summary = { restaurantId, restaurantName, uploaded: 0, duplicates: 0, skipped: 0, errors: 0 };
@@ -283,6 +392,7 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                 'input[type="password"]',
             ]);
             if (!passwordField) throw new Error('Could not find password input field');
+            if (!password) throw new Error(`rd_password is null for ${restaurantName} — update it in Supabase restaurants table`);
             await passwordField.click();
             await passwordField.fill(password);
 
@@ -521,6 +631,51 @@ async function processClient(browser, client, drive, dateRange, sbUrl, sbKey, st
                     message: `Uploaded ${fileName} → Drive ID ${driveFile.id}`,
                 });
 
+                // Parse Excel and write invoice_headers + invoice_lines to Supabase
+                try {
+                    const parsed = parseInvoiceExcel(localPath);
+                    if (parsed && parsed.items.length > 0) {
+                        // Dedup guard: skip if header already exists for this file
+                        const existingHeaders = fileRecordId
+                            ? await supabaseRequest(sbUrl, sbKey, 'GET', 'invoice_headers', null, `?file_id=eq.${fileRecordId}&select=id`)
+                            : [];
+                        if (existingHeaders && existingHeaders.length > 0) {
+                            console.log(`  ⏭ invoice_header already exists for file_id ${fileRecordId} — skipping duplicate insert`);
+                        } else {
+                            // Prefer total from inside the Excel; fall back to filename
+                            const invoiceTotal = parsed.invoiceTotalFromExcel ?? parseFilenameTotal(fileName) ?? 0;
+                            const [header] = await supabaseRequest(sbUrl, sbKey, 'POST', 'invoice_headers', {
+                                restaurant_id:  restaurantId,
+                                file_id:        fileRecordId,
+                                invoice_number: parsed.invoice_number ?? fileName,
+                                invoice_date:   receiptDate,
+                                vendor:         'Restaurant Depot',
+                                total:          invoiceTotal,
+                            });
+                            if (header?.id) {
+                                for (const item of parsed.items) {
+                                    await supabaseRequest(sbUrl, sbKey, 'POST', 'invoice_lines', {
+                                        header_id:     header.id,
+                                        restaurant_id: restaurantId,
+                                        invoice_date:  receiptDate,
+                                        item_name:     item.item_name,
+                                        category:      item.category,
+                                        unit_qty:      item.unit_qty,
+                                        case_qty:      item.case_qty,
+                                        unit_price:    item.unit_price,
+                                        total:         item.total,
+                                    });
+                                }
+                                console.log(`  📊 Inserted invoice header (total=$${invoiceTotal}) + ${parsed.items.length} line items`);
+                            }
+                        }
+                    } else {
+                        console.warn(`  ⚠ No line items parsed from Excel — skipping Supabase invoice insert`);
+                    }
+                } catch (parseErr) {
+                    console.warn(`  ⚠ Invoice parse/insert failed: ${parseErr.message}`);
+                }
+
                 summary.uploaded++;
 
                 await Actor.pushData({
@@ -618,7 +773,7 @@ Actor.main(async () => {
 
     // Launch one browser — reused across all clients via separate contexts
     console.log('🚀 Launching browser...');
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 
     const clientSummaries = [];
 
